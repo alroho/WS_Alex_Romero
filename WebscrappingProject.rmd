@@ -1,0 +1,171 @@
+---
+title: "Scraping NFL Draft Data"
+author: "Alex Romero Honrubia"
+date: "6 de julio de 2018"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+
+---
+
+# Goal
+
+The Goal is to download data from the NFL Draft from 2002 (last team joins the league) and do some basic statistics to explore the data and the quality of the teams. We will consider that a team that have a lot of picks in the the first 10 for several years is a bad team.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Data source
+
+The data source is Wikipedia, that have the same URL for each draft just changing the year. The web is based on HTML5 technology.
+
+# Approach/Technology used and steps.
+
+For downloading the data I have used the package rvest. As can be seen in the code the instruction is very easy:
+- A loop from 2002 to 2018 that just read the URL with *read_html* function and a *paste0* to move though the URL.
+- A *html_node* function that reflexes the type of the node where the data is stored, that has been identified using the *Gadget Selector*.
+- A *html_table* that interpret the data as a table.
+
+The code that follows the scraping is just data management to obtain the data.frame as tidy as possible.
+
+```{r, results= FALSE}
+require(dplyr)
+require(rvest)
+require(knitr)
+```
+
+```{r, warning=FALSE}
+urls <- character()
+a = list()
+fantasy = list()
+for(i in 2002:2018){
+  a <- read_html(paste0("https://en.wikipedia.org/wiki/",i,"_NFL_Draft"))
+  rating <- a %>%
+    html_nodes("div table") %>%
+    html_table(fill =TRUE)
+  #now the selection of the tables that we are loocking fot in the list 
+  #of tables in function of the wikipedia year page.
+  if (i %in% c(2003,2004,2005,2006,2007,2009,2011,2012,2013,2014)){pass <- rating[[6]]}
+  else if (i %in% c(2002,2008,2015,2016,2017,2018)){pass <- rating[[5]]}
+  else if (i %in% c(2010)){pass <- rating[[7]]}
+  #selection of the 7 relevant variables
+  pass <- pass[,c(2:9)]
+  #creation of the new variable of the draft year
+  pass$year <- i
+  pass$`Pick #` <- as.numeric(pass$`Pick #`)
+  #concatenating all the tables
+  if(i!=2002){
+    fantasy <- bind_rows(fantasy, pass)  
+  }
+  else {fantasy <- pass}
+}
+
+head(fantasy)
+tail(fantasy)
+
+```
+
+As we can see, the scraping result is a data frame with seven columns and all the players selected from the draft concatenated.
+
+
+# Short analysis of the data
+
+To explore the data and show how some results first of all I have done some preprocessing.
+
+Rename teams that have changed his name along the 17 years span.
+
+```{r}
+fantasy$`NFL team`[fantasy$`NFL team` == "San Diego Chargers"] <- "Los Angeles Chargers"
+fantasy$`NFL team`[fantasy$`NFL team` == "St. Louis Rams"] <- "Los Angeles Rams"
+```
+
+Correct that some teams have 2 blanks between words instead of one.
+
+```{r}
+library(stringr)
+fantasy$`NFL team` <- gsub("\\s+", " ", str_trim(fantasy$`NFL team`))
+```
+
+\newpage
+
+## Basic stastistics.
+
+Top ten teams with more top ten draft picks.
+
+```{r}
+fantasy %>% 
+  filter(`Pick #` %in% c(1:10)) %>% 
+  group_by(`NFL team`) %>% 
+  summarise(n=n()) %>% 
+  arrange(desc(n)) %>% 
+  top_n(10) %>% 
+  kable()
+```
+
+
+
+
+Top colleges with more drafted players.
+
+```{r}
+fantasy %>% 
+  group_by(College, Conf.) %>% 
+  summarise(n=n()) %>% 
+  arrange(desc(n)) %>% 
+  head(10)%>% 
+  kable()
+```
+
+Top colleges with more drafted players in the top ten picks.
+
+```{r}
+fantasy %>% 
+  filter(`Pick #` %in% c(1:10)) %>% 
+  group_by(College) %>% 
+  summarise(n=n()) %>% 
+  arrange(desc(n)) %>% 
+  head(10) %>% 
+  kable()
+```
+
+Drafteds Heisman Trophies winners (Heisman Trophie is the college award for the best player of the year).
+
+```{r}
+fantasy %>% 
+  group_by(year) %>%
+  filter(str_detect(Notes, 'Heisman')) %>% 
+  arrange(`Pick #`) %>%
+  select(`Pick #`, `NFL team`, Player, Pos., College, year) %>% 
+  kable()
+```
+
+Teams that have drafted more Heisman Trophie winners.
+
+```{r}
+fantasy %>% 
+  group_by(`NFL team`) %>%
+  filter(str_detect(Notes, 'Heisman')) %>% 
+  summarise(n = n()) %>% 
+  arrange(desc(n)) %>% 
+  kable()
+```
+
+Teams that have drafted more Pro-bowlers. (Pro-bowlers are something like the best players in the season)
+
+The difficult here is to select the players that have the called *dagger* symbol in unicode, that means that the player is a Pro-Bowler.
+
+```{r}
+
+fantasy %>% 
+  group_by(`NFL team`) %>%
+  filter(str_detect(Player, '[^\001-\177]')) %>% 
+  summarise(n = n()) %>% 
+  arrange(desc(n)) %>% 
+  head(10) %>% 
+  kable()
+```
+
+# Limitations found
+
+The limitations that I have found is that the table of the wikipedia page where the data is stored is not the same every year, so it's different for every page. I have lost some time to understand the problem and found the solution, which has been focus in every year and find the exactly table where the data is stored, for data through 50 years it would have been impossible or a big lost of time.
